@@ -124,6 +124,7 @@ jobs:
 
         # ================= 核心代理内核 (Sing-Box) =================
         CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
+        CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y
 
         # ================= 显式关闭不必要的组件与插件 =================
         # 负载均衡
