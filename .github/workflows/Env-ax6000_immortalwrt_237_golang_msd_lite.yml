@@ -124,7 +124,7 @@ jobs:
         sed -i 's/ImmortalWrt/Redmi-AX6000/g' package/base-files/files/bin/config_generate
 
         # 5. 补全展开配置
-        make defconfig
+        rm -rf tmp && make defconfig
 
     - name: Generate Variables(生成变量)
       run: |
