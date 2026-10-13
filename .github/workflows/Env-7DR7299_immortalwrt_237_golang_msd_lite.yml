@@ -96,7 +96,7 @@ jobs:
         # 更改主机名
         cd "$OPENWRT_PATH"
         sed -i 's/ImmortalWrt/TL-7DR7299/g' package/base-files/files/bin/config_generate
-        make defconfig
+        rm -rf tmp && make defconfig
 
     - name: Generate Variables(生成变量)
       run: |
