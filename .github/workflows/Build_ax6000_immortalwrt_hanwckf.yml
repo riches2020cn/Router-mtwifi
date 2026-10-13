@@ -142,7 +142,7 @@ jobs:
 
         # 导入 customize_immortalwrt.sh 文件
         chmod +x ./customize_immortalwrt.sh && ./customize_immortalwrt.sh
-        cd /builder/openwrt && make defconfig
+        cd /builder/openwrt && rm -rf tmp && make defconfig
         
     - name: Download package
       working-directory: /builder/openwrt
