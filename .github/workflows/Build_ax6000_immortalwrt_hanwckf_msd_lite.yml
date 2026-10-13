@@ -190,7 +190,6 @@ jobs:
         df -h
 
     - name: Organize Files (整理固件与插件)
-    - name: Organize Files (整理固件与插件)
       id: organize
       working-directory: /builder/openwrt
       if: success() && !cancelled()
