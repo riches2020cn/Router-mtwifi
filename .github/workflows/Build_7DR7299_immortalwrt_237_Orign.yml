@@ -138,7 +138,7 @@ jobs:
         sed -i 's/192.168.6.1/192.168.2.1/g' /builder/openwrt/package/base-files/files/bin/config_generate
         # 更改主机名
         sed -i 's/ImmortalWrt/TL-7DR7299/g' /builder/openwrt/package/base-files/files/bin/config_generate
-        cd /builder/openwrt && make defconfig
+        cd /builder/openwrt && rm -rf tmp && make defconfig
 
     - name: Download package
       working-directory: /builder/openwrt
