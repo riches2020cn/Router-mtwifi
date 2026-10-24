@@ -92,24 +92,8 @@ jobs:
     - name: Update feeds（更新 feeds）
       working-directory: /builder/openwrt
       run: |
-        ./scripts/feeds update -a        
+        ./scripts/feeds update -a
 
-       #======= 解决 Passwall 的 Geoview 报错问题（置于更新和安装 feeds 命令之间）=======
-    - name: 升级 Passwall 工具链为 golang1.27
-      working-directory: /builder/openwrt
-      run: |
-        # 1. 直接将本地仓库根目录下的 golang1.27 复制到 feeds 目录
-        rm -rf feeds/packages/lang/golang1.27        
-        mkdir -p feeds/packages/lang/golang1.27
-        cp -rf "$GITHUB_WORKSPACE/golang1.27/." feeds/packages/lang/golang1.27/
-
-        # 2. 强制更新索引并安装 golang1.27（同时刷入 feeds 索引列表）
-        ./scripts/feeds update -f packages
-        ./scripts/feeds install -p packages -f golang1.27
-        
-        # 3. 删除临时目录
-        rm -rf tmp
-        
     - name: Install feeds（安装 feeds）
       working-directory: /builder/openwrt
       run: |
@@ -156,44 +140,76 @@ jobs:
         # 删除临时目录
         rm -rf tmp
 
-       #======= 解决 Passwall 的 Geoview 报错问题，修改 passwall-packages 文件（安装 Passwall 之后）=======
-    - name: 修改 passwall-packages 目录下所有 Makefile 文件中 golang 路径指向 golang1.27
+    # ============================================================================================================
+    # 🌟 1. 解决 Passwall 和 daed 报错问题：升级 Go 1.27 工具链并绑定依赖（必须放在 feeds更新 和 passwall 拉取命令之后）
+    # ============================================================================================================
+    - name: Integrate Go 1.27 Toolchain (升级 golang 工具链)
       working-directory: /builder/openwrt
       run: |
-        # 1. 修改 package/passwall-packages 目录下所有 Makefile 路径指向 golang1.27
-        TARGET_DIRS=()
-        [ -d "package/passwall-packages" ] && TARGET_DIRS+=("package/passwall-packages")
+        echo "=== 1. 克隆作者指定的 Go 1.27 快照 Commit ==="
+        mkdir -p /tmp/golang-daed-src
+        git clone -q https://github.com/immortalwrt/packages.git /tmp/golang-daed-src
+        # 升级 golang 版本，打开 https://github.com/immortalwrt/packages.git（保持 master 默认主分支），复制最新的 commits 替换下方“25ad600a90980bed1ee76a212f9a5e42b499bb62”即可拉取 golang 最新版本
+        # 升级 golang 版本，还必须更新下方代码中所有 golang1.27 版本号（最新版本号查看：打开 https://github.com/immortalwrt/packages.git，打开 lang/golang/golang1.27/Makefile 文件，找到：PKG_NAME:=golang1.27）
+        git -C /tmp/golang-daed-src checkout 25ad600a90980bed1ee76a212f9a5e42b499bb62
 
-        if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
-          find "${TARGET_DIRS[@]}" -name "Makefile" -type f -exec sed -i \
-            -e 's|\<golang/golang-package.mk\>|golang1.27/golang-package.mk|g' \
-            -e 's|\<golang/host\>|golang1.27/host|g' {} +
-        else
-          echo "ERROR: 未找到 package/passwall-packages 目录，无法进行路径替换，终止编译！"
-          exit 1
-        fi
+        echo "=== 2. 隔离提取 lang/golang 到 package/golang-daed ==="
+        rm -rf package/golang-daed
+        mkdir -p package/golang-daed
+        # 排除默认的 golang 目录，避免破坏上游系统的 golang 别名
+        rsync -av --exclude='golang' /tmp/golang-daed-src/lang/golang/ package/golang-daed/
+        rm -rf /tmp/golang-daed-src
 
-        # 2. 检查是否成功替换 golang1.27 版本，如果退出，说明 golang 版本与 Passwall 要求的 golang 版本对不上。通过以下方法确认版本已经不一致，请打开 https://github.com/Openwrt-Passwall/openwrt-passwall-packages，打开 geoview/Makefile 文件，搜索“golang”并获取相关路径：/feeds/packages/lang/golang/golang-package.mk，确认能在本地仓库 golang1.27 目录下找到“golang-package.mk”文件，且路径一致，否则就是版本对不上（将 golang1.27 目录复制到 /feeds/packages/lang/ 目录下与 golang 并存）
-        echo "=== 检查是否成功替换 golang1.27 版本 ==="
-        GOLANG_TARGET_FILE="feeds/packages/lang/golang1.27/golang1.27/Makefile"
+        echo "=== 3. 强刷新并安装 golang1.27 工具包 ==="
+        ./scripts/feeds install -p packages -f golang1.27
+
+        echo "=== 4. 动态重定向代理组件的 Golang 编译依赖 (如 daed / passwall 等) ==="
+        # 寻找包含 golang 编译依赖的所有 Makefile 并替换指向 golang-daed 和 golang1.27/host
+        find package/ feeds/ -type f -name "Makefile" | while read -r mk; do
+          if grep -q "golang/host" "$mk" || grep -q "golang-package.mk" "$mk"; then
+            echo "Patching Golang dependency in: $mk"
+            # 将 golang/host 替换为 golang1.27/host
+            sed -i 's|golang/host|golang1.27/host|g' "$mk"
+            # 无论上游是用什么绝对或相对路径引入 golang-package.mk，全部重定向到我们隔离的 package/golang-daed
+            sed -i 's|.*golang-package\.mk|include $(TOPDIR)/package/golang-daed/golang-package.mk|g' "$mk"
+          fi
+        done
+
+        # 删除临时目录
+        rm -rf tmp
+        
+        # =====================================================================================
+        # 🌟 2. 检查 Passwall 是否成功替换 golang1.27 版本（升级 golang 版本如果改变了路径，会报错）
+        # =====================================================================================
+        echo "=== 5. 检查是否成功挂载 golang-daed 工具链 ==="
+        GOLANG_TARGET_FILE="package/golang-daed/golang1.27/Makefile"
         if [ -f "$GOLANG_TARGET_FILE" ] && grep -q "PKG_NAME:=golang1.27" "$GOLANG_TARGET_FILE"; then
-          echo "SUCCESS: 验证通过，在 feeds/packages/lang/golang1.27/golang1.27/Makefile 文件中，包含 PKG_NAME:=golang1.27"
+          echo "SUCCESS: 验证通过，在 $GOLANG_TARGET_FILE 中包含 PKG_NAME:=golang1.27"
         else
-          echo "ERROR: golang1.27 验证失败！在 feeds/packages/lang/golang1.27/golang1.27/Makefile 文件中，未找到 PKG_NAME:=golang1.27"
+          echo "ERROR: 验证失败！未在 package/golang-daed/golang1.27/Makefile 中找到对应配置。"
           exit 1
         fi
 
-        # 3. 检查修改结果（抽查核心组件 xray-core 的 Makefile 文件指向 golang1.27），检查失败自动退出
-        echo "=== 检查 package/passwall-packages 下 所有的 Makefile 文件中的 Go 编译依赖指向 golang1.27 ==="
-        xray_Makefile="package/passwall-packages/xray-core/Makefile"
-        if [ -f "$xray_Makefile" ] && grep -q "golang1.27/golang-package.mk" "$xray_Makefile"; then
-          echo "SUCCESS: 在 package/passwall-packages/xray-core/Makefile 找到 golang-package.mk 路径已成功修改为 golang1.27！"
+        echo "=== 6. 精准检查 package/passwall-packages 下的 Makefile 依赖 ==="
+        # 寻找 package/passwall-packages 中任意一个包含 golang 依赖的 Makefile 进行精准断言
+        PW_MK=$(find package/passwall-packages/ -type f -name "Makefile" -exec grep -l "golang1.27/host" {} + | head -n 1)
+        if [ -n "$PW_MK" ]; then
+          echo "SUCCESS: 验证通过！Passwall 目录下的组件已成功指向 golang1.27/host: $PW_MK"
         else
-          echo "ERROR: 在 package/passwall-packages/xray-core/Makefile 文件中，未找到 golang-package.mk 路径替换失败！"
+          echo "ERROR: 校验失败！未在 package/passwall-packages/ 中找到指向 golang1.27/host 的 Makefile，路径替换未生效！"
           exit 1
         fi
-
-        # 4. 删除临时目录
+        
+        echo "=== 7. 检查确保全局是否成功指向 golang-daed ==="
+        CHECKED_MK=$(find package/ feeds/ -type f -name "Makefile" -exec grep -l "package/golang-daed/golang-package.mk" {} + | head -n 1)
+        if [ -n "$CHECKED_MK" ]; then
+          echo "SUCCESS: 全局 Makefile 引用抽查通过: $CHECKED_MK"
+        else
+          echo "ERROR: 校验失败！未找到对 package/golang-daed/golang-package.mk 的引用。"
+          exit 1
+        fi
+        
+        # 删除临时目录
         rm -rf tmp 
         
     - name: Configuration Customization - Build_ax6000_immortalwrt_237_golang 
