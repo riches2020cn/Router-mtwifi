@@ -17,7 +17,7 @@
 - 名称包含“Env”：使用变量 和 引用 scripts 文件夹
 ---
 
-## 📖 Env脚本说明
+## 📖 Env脚本说明（Passwall 指向升级版 golang1.27）
 
 2. 云编译Env脚本说明：
 - Env脚本修改自 WoChen5770 仓库：https://github.com/WoChen5770/openwrt-7dr7299
