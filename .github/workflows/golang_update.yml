@@ -1,0 +1,56 @@
+name: golang_update
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-golang:
+    runs-on: ubuntu-latest
+    
+    # 赋予工作流写入仓库的权限
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v7
+
+      - name: Pull and extract golang folder
+        run: |
+          echo "=== 1. 克隆目标仓库的指定目录 ==="
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/immortalwrt/packages.git temp_packages
+          cd temp_packages
+          git sparse-checkout set lang/golang
+          cd ..
+          
+          echo "=== 2. 更新根目录下的 golang_update 文件夹 ==="
+          # 如果已存在则删除旧的
+          rm -rf golang_update
+          
+          # 复制并重命名
+          cp -r temp_packages/lang/golang golang_update
+          
+          # 清理复制过来的 .git 隐藏目录，避免嵌套 Git 仓库问题
+          rm -rf golang_update/.git
+          
+          # 清理临时克隆的仓库
+          rm -rf temp_packages
+          
+          echo "=== 3. 检查文件状态 ==="
+          ls -la golang_update
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add golang_update
+          
+          # 检查是否有改动，有改动才提交
+          if git diff --staged --quiet; then
+            echo "没有检测到内容变化，无需提交。"
+          else
+            git commit -m "Auto-update: sync golang from immortalwrt/packages"
+            git push
+            echo "已成功推送到仓库！"
+          fi
